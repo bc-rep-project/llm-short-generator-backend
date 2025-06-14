@@ -42,5 +42,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 EXPOSE 5678
 
-# Use node to run n8n directly
-CMD ["node", "/usr/local/lib/node_modules/n8n/bin/n8n", "start"] 
+# Let the original n8n image handle the startup command
