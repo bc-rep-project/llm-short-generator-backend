@@ -1,0 +1,61 @@
+services:
+  - type: web
+    name: n8n-video-repurposing
+    env: docker
+    plan: standard
+    dockerfilePath: ./Dockerfile
+    disk:
+      name: n8n-data
+      mountPath: /home/node/.n8n
+      sizeGB: 5
+    envVars:
+      - key: N8N_HOST
+        value: 0.0.0.0
+      - key: N8N_PORT
+        value: 5678
+      - key: N8N_PROTOCOL
+        value: https
+      - key: WEBHOOK_URL
+        fromService:
+          type: web
+          name: n8n-video-repurposing
+          property: host
+      - key: N8N_BASIC_AUTH_ACTIVE
+        value: true
+      - key: N8N_BASIC_AUTH_USER
+        fromService:
+          type: web
+          name: n8n-video-repurposing
+          envVarKey: N8N_USER
+      - key: N8N_BASIC_AUTH_PASSWORD
+        fromService:
+          type: web
+          name: n8n-video-repurposing
+          envVarKey: N8N_PASSWORD
+      - key: N8N_USER
+        sync: false
+      - key: N8N_PASSWORD
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: N8N_ENCRYPTION_KEY
+        sync: false
+      - key: GENERIC_TIMEZONE
+        value: UTC
+      - key: DB_TYPE
+        value: sqlite
+      - key: DB_SQLITE_DATABASE
+        value: /home/node/.n8n/database.sqlite
+      - key: N8N_DISABLE_UI
+        value: false
+      - key: N8N_METRICS
+        value: true
+      - key: N8N_LOG_LEVEL
+        value: info
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /healthz
+    buildCommand: |
+      echo "Build completed, using Docker image"
+    startCommand: |
+      n8n start 
