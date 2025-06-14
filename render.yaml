@@ -3,7 +3,7 @@ services:
     name: n8n-video-repurposing
     env: docker
     plan: standard
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./Dockerfile.render
     disk:
       name: n8n-data
       mountPath: /home/node/.n8n

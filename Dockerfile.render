@@ -12,8 +12,8 @@ RUN apk add --no-cache \
     bash \
     ca-certificates
 
-# Install yt-dlp
-RUN pip3 install --no-cache-dir yt-dlp
+# Install yt-dlp with --break-system-packages flag to bypass PEP 668
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 # Create directories for video processing and ensure proper permissions
 RUN mkdir -p /home/node/n8n_video_files && \
