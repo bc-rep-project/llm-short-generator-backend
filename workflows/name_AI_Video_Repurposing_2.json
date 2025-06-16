@@ -2,111 +2,29 @@
   "name": "AI Video Repurposing Pipeline (Universal Version)",
   "nodes": [
     {
-      "parameters": {},
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-video-repurposing",
+        "responseMode": "responseNode",
+        "options": {}
+      },
       "id": "18f99e3a-4dd3-49d6-993d-31728564a51d",
-      "name": "Start",
-      "type": "n8n-nodes-base.start",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
         -20,
         300
-      ]
-    },
-    {
-      "parameters": {
-        "command": "mkdir -p {{ $json.run_path }}"
-      },
-      "id": "e331b255-dd3a-44fe-a226-0610313f0175",
-      "name": "2. Create Run Folder",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        400,
-        300
       ],
-      "executeOnce": true
+      "webhookId": "QKRse"
     },
     {
       "parameters": {
-        "command": "=ffmpeg -i {{ $json.run_path }}/video.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 {{ $json.run_path }}/audio.wav"
-      },
-      "id": "c161179e-4a67-4224-bcae-2134b4c6e94a",
-      "name": "4. Extract Audio",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        840,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// The LLM returns a JSON string, we need to parse it into a real object\n// that n8n can use, specifically for the Split in Batches node.\nconst aiResponseString = $json.choices[0].message.content;\n\ntry {\n  const parsedJson = JSON.parse(aiResponseString);\n  // The prompt asks for an object { \"clips\": [...] }\n  // We return just the array for the Split in Batches node.\n  return parsedJson.clips;\n} catch (error) {\n  throw new Error(`Failed to parse AI response. The LLM did not return valid JSON. Response was: ${aiResponseString}`);\n}\n"
-      },
-      "id": "679f22ac-170f-43ea-923f-b25859544715",
-      "name": "7. Parse AI Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1560,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "batchSize": 1,
-        "options": {}
-      },
-      "id": "4b68e547-062e-4b46-a010-062972986f3b",
-      "name": "8. Loop Through Each Clip",
-      "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 2,
-      "position": [
-        1780,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const fs = require('fs');\n\n// Get the full word-level transcript from the Whisper node\n// We use .$node because this data is from before the Split in Batches loop started\nconst whisperNodeOutput = $items(\"5. Transcribe Audio (Whisper)\")[0].json;\n\n// Check if the expected 'words' property exists\nif (!whisperNodeOutput || !whisperNodeOutput.words) {\n  throw new Error(\"Could not find word-level transcript in the output from the Whisper node. Full output: \" + JSON.stringify(whisperNodeOutput));\n}\n\nconst fullTranscript = whisperNodeOutput.words;\n\n// Get the current clip's info from the loop\nconst clip = $json;\nconst startTime = clip.start_time;\nconst endTime = clip.end_time;\n\n// Filter the transcript to get only the words within this clip's timeframe\nconst clipWords = fullTranscript.filter(word => word.start >= startTime && word.end <= endTime);\n\n// Helper function to format seconds into SRT timestamp format (HH:MM:SS,ms)\nfunction formatSrtTime(seconds) {\n  const date = new Date(0);\n  date.setSeconds(seconds);\n  const timeStr = date.toISOString().substr(11, 12);\n  return timeStr.replace('.', ',');\n}\n\nlet srtContent = '';\n// Create SRT entries in batches of a few words to make captions more readable\nconst wordsPerCaption = 5;\nfor (let i = 0; i < clipWords.length; i += wordsPerCaption) {\n    const chunk = clipWords.slice(i, i + wordsPerCaption);\n    if (chunk.length === 0) continue;\n\n    const srtIndex = (i / wordsPerCaption) + 1;\n    const srtStart = formatSrtTime(chunk[0].start);\n    const srtEnd = formatSrtTime(chunk[chunk.length - 1].end);\n    const srtText = chunk.map(w => w.word).join(' ');\n\n    srtContent += `${srtIndex}\\n${srtStart} --> ${srtEnd}\\n${srtText}\\n\\n`;\n}\n\n// Write the SRT content to a file\n// The file path comes from the node that created the run folder\nconst runPath = $items(\"1. Set Paths & Run ID\")[0].json.run_path;\nconst srtFilePath = `${runPath}/clip_${$loop.iterations}.srt`;\n\nfs.writeFileSync(srtFilePath, srtContent);\n\n// Return the path to the SRT file for the next node\nreturn { srt_file_path: srtFilePath };\n"
-      },
-      "id": "278e1c6b-67a9-4591-959c-76e3d233c4a2",
-      "name": "9. Generate Subtitles File (.srt)",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1780,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "command": "=ffmpeg -i {{ $items(\"1. Set Paths & Run ID\")[0].json.run_path }}/video.mp4 -ss {{ $json.start_time }} -to {{ $json.end_time }} -vf \"crop=ih*9/16:ih,subtitles={{ $parent.json.srt_file_path }}:force_style='FontName=Arial Black,FontSize=22,PrimaryColour=&HFFFFFF,BorderStyle=3,OutlineColour=&H80000000,Shadow=0,Alignment=10,MarginV=50'\" -c:a copy {{ $items(\"1. Set Paths & Run ID\")[0].json.run_path }}/FINAL_CLIP_{{ $loop.iterations + 1 }}.mp4"
-      },
-      "id": "e6a1005f-0a13-40e1-b481-9b69b6183353",
-      "name": "10. Cut, Reframe & Burn Captions",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        2020,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "values": {
-          "string": [
-            {
-              "name": "videoUrl",
-              "value": "https://www.youtube.com/watch?v=YOUR_YOUTUBE_VIDEO_URL"
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// Extract video URL from webhook payload\nconst body = $json.body || $json;\nconst videoUrl = body.videoUrl || body.url;\n\nif (!videoUrl) {\n  throw new Error('No video URL provided in request body');\n}\n\n// Validate YouTube URL\nconst youtubeRegex = /^(https?:\\/\\/)?(www\\.)?(youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/;\nif (!youtubeRegex.test(videoUrl)) {\n  throw new Error('Invalid YouTube URL format');\n}\n\nreturn [{ videoUrl: videoUrl.trim() }];"
       },
       "id": "be66e962-e64e-4b24-b15a-9b4181a4a159",
-      "name": "Input Video URL",
-      "type": "n8n-nodes-base.set",
+      "name": "1. Validate Input",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         180,
@@ -123,14 +41,14 @@
             },
             {
               "name": "run_path",
-              "value": "=/home/node/n8n_video_files/{{ $json.run_id }}"
+              "value": "=/tmp/n8n_video_files/{{ $json.run_id }}"
             }
           ]
         },
         "options": {}
       },
       "id": "8f8319e7-49d9-430c-ab2f-e8b9819717bd",
-      "name": "1. Set Paths & Run ID",
+      "name": "2. Set Paths & Run ID",
       "type": "n8n-nodes-base.set",
       "typeVersion": 2,
       "position": [
@@ -140,28 +58,41 @@
     },
     {
       "parameters": {
-        "note": "This workflow re-creates a simplified version of Opus.pro.\n\n**REQUIREMENTS:**\n1.  **n8n in Docker**: This must run in a Docker container.\n2.  **Custom Docker Image**: The n8n container must have `ffmpeg` and `yt-dlp` installed.\n3.  **OpenAI Credentials**: Add your API key to the HTTP Request nodes (5 & 6).\n\n**HOW TO RUN:**\n1.  Replace the URL in the \"Input Video URL\" node.\n2.  Set your OpenAI credentials in nodes 5 and 6.\n3.  Click \"Execute Workflow\"."
+        "command": "mkdir -p {{ $json.run_path }}"
       },
-      "id": "3bd91d52-5989-49dd-a010-090956b9c9f4",
-      "name": "README",
-      "type": "n8n-nodes-base.stickyNote",
+      "id": "e331b255-dd3a-44fe-a226-0610313f0175",
+      "name": "3. Create Run Folder",
+      "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        -20,
-        80
+        400,
+        300
       ],
-      "color": "#FFD599"
+      "executeOnce": true
     },
     {
       "parameters": {
         "command": "=yt-dlp -o \"{{ $json.run_path }}/video.%(ext)s\" -f \"best[ext=mp4]/best\" --no-warnings \"{{ $json.videoUrl }}\""
       },
       "id": "875638c4-11e2-45e5-a043-e3801ec6f8f5",
-      "name": "3. Download Video",
+      "name": "4. Download Video",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
         620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=ffmpeg -i {{ $json.run_path }}/video.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 {{ $json.run_path }}/audio.wav"
+      },
+      "id": "c161179e-4a67-4224-bcae-2134b4c6e94a",
+      "name": "5. Extract Audio",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        840,
         300
       ]
     },
@@ -180,13 +111,18 @@
             {
               "name": "response_format",
               "value": "verbose_json"
+            },
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "audio_file"
             }
           ]
         },
         "options": {}
       },
       "id": "2785d03a-c859-4592-8889-b8832a826456",
-      "name": "5. Transcribe Audio (Whisper)",
+      "name": "6. Transcribe Audio (Whisper)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
@@ -195,10 +131,24 @@
       ],
       "credentials": {
         "headerAuth": {
-          "id": "YOUR_CREDENTIALS_ID",
-          "name": "OpenAI Auth Header"
+          "id": "openai-api-key",
+          "name": "OpenAI API Key"
         }
       }
+    },
+    {
+      "parameters": {
+        "filePath": "={{ $items(\"2. Set Paths & Run ID\")[0].json.run_path }}/audio.wav",
+        "options": {}
+      },
+      "id": "audio-file-loader",
+      "name": "Load Audio File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        900,
+        520
+      ]
     },
     {
       "parameters": {
@@ -210,7 +160,7 @@
         "options": {}
       },
       "id": "281691a5-83e9-4458-94ed-4f25b30b4279",
-      "name": "6. Identify Viral Clips (LLM)",
+      "name": "7. Identify Viral Clips (LLM)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
@@ -219,133 +169,258 @@
       ],
       "credentials": {
         "headerAuth": {
-          "id": "YOUR_CREDENTIALS_ID",
-          "name": "OpenAI Auth Header"
+          "id": "openai-api-key",
+          "name": "OpenAI API Key"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "// The LLM returns a JSON string, we need to parse it into a real object\n// that n8n can use, specifically for the Split in Batches node.\nconst aiResponseString = $json.choices[0].message.content;\n\ntry {\n  const parsedJson = JSON.parse(aiResponseString);\n  // The prompt asks for an object { \"clips\": [...] }\n  // We return just the array for the Split in Batches node.\n  if (!parsedJson.clips || !Array.isArray(parsedJson.clips)) {\n    throw new Error('AI response does not contain a valid clips array');\n  }\n  return parsedJson.clips;\n} catch (error) {\n  throw new Error(`Failed to parse AI response. The LLM did not return valid JSON. Response was: ${aiResponseString}`);\n}\n"
+      },
+      "id": "679f22ac-170f-43ea-923f-b25859544715",
+      "name": "8. Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "4b68e547-062e-4b46-a010-062972986f3b",
+      "name": "9. Loop Through Each Clip",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\n\n// Get the full word-level transcript from the Whisper node\n// We use .$node because this data is from before the Split in Batches loop started\nconst whisperNodeOutput = $items(\"6. Transcribe Audio (Whisper)\")[0].json;\n\n// Check if the expected 'words' property exists\nif (!whisperNodeOutput || !whisperNodeOutput.words) {\n  throw new Error(\"Could not find word-level transcript in the output from the Whisper node. Full output: \" + JSON.stringify(whisperNodeOutput));\n}\n\nconst fullTranscript = whisperNodeOutput.words;\n\n// Get the current clip's info from the loop\nconst clip = $json;\nconst startTime = clip.start_time;\nconst endTime = clip.end_time;\n\n// Filter the transcript to get only the words within this clip's timeframe\nconst clipWords = fullTranscript.filter(word => word.start >= startTime && word.end <= endTime);\n\n// Helper function to format seconds into SRT timestamp format (HH:MM:SS,ms)\nfunction formatSrtTime(seconds) {\n  const date = new Date(0);\n  date.setSeconds(seconds);\n  const timeStr = date.toISOString().substr(11, 12);\n  return timeStr.replace('.', ',');\n}\n\nlet srtContent = '';\n// Create SRT entries in batches of a few words to make captions more readable\nconst wordsPerCaption = 5;\nfor (let i = 0; i < clipWords.length; i += wordsPerCaption) {\n    const chunk = clipWords.slice(i, i + wordsPerCaption);\n    if (chunk.length === 0) continue;\n\n    const srtIndex = (i / wordsPerCaption) + 1;\n    const srtStart = formatSrtTime(chunk[0].start);\n    const srtEnd = formatSrtTime(chunk[chunk.length - 1].end);\n    const srtText = chunk.map(w => w.word).join(' ');\n\n    srtContent += `${srtIndex}\\n${srtStart} --> ${srtEnd}\\n${srtText}\\n\\n`;\n}\n\n// Write the SRT content to a file\n// The file path comes from the node that created the run folder\nconst runPath = $items(\"2. Set Paths & Run ID\")[0].json.run_path;\nconst srtFilePath = `${runPath}/clip_${$loop.iterations}.srt`;\n\nfs.writeFileSync(srtFilePath, srtContent);\n\n// Return the path to the SRT file for the next node\nreturn { srt_file_path: srtFilePath };\n"
+      },
+      "id": "278e1c6b-67a9-4591-959c-76e3d233c4a2",
+      "name": "10. Generate Subtitles File (.srt)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=ffmpeg -i {{ $items(\"2. Set Paths & Run ID\")[0].json.run_path }}/video.mp4 -ss {{ $json.start_time }} -to {{ $json.end_time }} -vf \"crop=ih*9/16:ih,subtitles={{ $parent.json.srt_file_path }}:force_style='FontName=Arial Black,FontSize=22,PrimaryColour=&HFFFFFF,BorderStyle=3,OutlineColour=&H80000000,Shadow=0,Alignment=10,MarginV=50'\" -c:a copy {{ $items(\"2. Set Paths & Run ID\")[0].json.run_path }}/FINAL_CLIP_{{ $loop.iterations + 1 }}.mp4"
+      },
+      "id": "e6a1005f-0a13-40e1-b481-9b69b6183353",
+      "name": "11. Cut, Reframe & Burn Captions",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2020,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Video processing completed successfully\",\n  \"run_id\": \"{{ $items('2. Set Paths & Run ID')[0].json.run_id }}\",\n  \"clips_generated\": {{ $items('8. Parse AI Response')[0].json.length }},\n  \"output_path\": \"{{ $items('2. Set Paths & Run ID')[0].json.run_path }}\"\n}",
+        "options": {}
+      },
+      "id": "response-success",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"error\",\n  \"message\": \"{{ $json.error?.message || 'An error occurred during processing' }}\",\n  \"run_id\": \"{{ $items('2. Set Paths & Run ID')?.[0]?.json?.run_id || 'unknown' }}\"\n}",
+        "responseCode": 500,
+        "options": {}
+      },
+      "id": "response-error",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2260,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "note": "# AI Video Repurposing Pipeline (Production Ready)\n\n**FEATURES:**\n✅ **Webhook Trigger**: Production-ready API endpoint\n✅ **Input Validation**: Validates YouTube URLs automatically\n✅ **Error Handling**: Comprehensive error responses\n✅ **Auto Subtitles**: Word-level timing with styled captions\n✅ **Mobile Format**: Crops to 9:16 aspect ratio\n✅ **AI Analysis**: GPT-4 identifies viral moments\n\n**SETUP REQUIRED:**\n1. **OpenAI Credentials**: Create credential named 'openai-api-key'\n2. **Docker Dependencies**: ffmpeg, yt-dlp, python3 (included in Dockerfile)\n3. **Webhook URL**: Use the webhook URL for API calls\n\n**API USAGE:**\nPOST to webhook endpoint with:\n```json\n{\n  \"videoUrl\": \"https://www.youtube.com/watch?v=VIDEO_ID\"\n}\n```\n\n**RESPONSE:**\n- Success: Status 200 with processing details\n- Error: Status 500 with error message\n\n**OUTPUT:**\nFinal clips saved as: `/tmp/n8n_video_files/{run_id}/FINAL_CLIP_*.mp4`"
+      },
+      "id": "3bd91d52-5989-49dd-a010-090956b9c9f4",
+      "name": "📋 PRODUCTION GUIDE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        80
+      ],
+      "color": "#7CE6A6"
     }
   ],
   "connections": {
-    "Start": {
+    "Webhook Trigger": {
       "main": [
         [
           {
-            "node": "Input Video URL",
+            "node": "1. Validate Input",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "2. Create Run Folder": {
+    "1. Validate Input": {
       "main": [
         [
           {
-            "node": "3. Download Video",
+            "node": "2. Set Paths & Run ID",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "4. Extract Audio": {
+    "2. Set Paths & Run ID": {
       "main": [
         [
           {
-            "node": "5. Transcribe Audio (Whisper)",
+            "node": "3. Create Run Folder",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "7. Parse AI Response": {
+    "3. Create Run Folder": {
       "main": [
         [
           {
-            "node": "8. Loop Through Each Clip",
+            "node": "4. Download Video",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "8. Loop Through Each Clip": {
+    "4. Download Video": {
       "main": [
         [
           {
-            "node": "9. Generate Subtitles File (.srt)",
+            "node": "5. Extract Audio",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "9. Generate Subtitles File (.srt)": {
+    "5. Extract Audio": {
       "main": [
         [
           {
-            "node": "10. Cut, Reframe & Burn Captions",
+            "node": "Load Audio File",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Input Video URL": {
+    "Load Audio File": {
       "main": [
         [
           {
-            "node": "1. Set Paths & Run ID",
+            "node": "6. Transcribe Audio (Whisper)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "1. Set Paths & Run ID": {
+    "6. Transcribe Audio (Whisper)": {
       "main": [
         [
           {
-            "node": "2. Create Run Folder",
+            "node": "7. Identify Viral Clips (LLM)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "3. Download Video": {
+    "7. Identify Viral Clips (LLM)": {
       "main": [
         [
           {
-            "node": "4. Extract Audio",
+            "node": "8. Parse AI Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "5. Transcribe Audio (Whisper)": {
+    "8. Parse AI Response": {
       "main": [
         [
           {
-            "node": "6. Identify Viral Clips (LLM)",
+            "node": "9. Loop Through Each Clip",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "6. Identify Viral Clips (LLM)": {
+    "9. Loop Through Each Clip": {
       "main": [
         [
           {
-            "node": "7. Parse AI Response",
+            "node": "10. Generate Subtitles File (.srt)",
             "type": "main",
             "index": 0
           }
         ]
       ]
+    },
+    "10. Generate Subtitles File (.srt)": {
+      "main": [
+        [
+          {
+            "node": "11. Cut, Reframe & Burn Captions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11. Cut, Reframe & Burn Captions": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "errorWorkflow": {
+      "id": "response-error"
     }
   }
 }
