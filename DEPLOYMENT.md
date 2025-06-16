@@ -2,6 +2,52 @@
 
 This guide covers deploying the AI Video Repurposing Pipeline to the cloud using **Render.com** (backend) and **Vercel** (frontend).
 
+## 🚨 CRITICAL: CORS Configuration Fix
+
+**If you're seeing CORS errors like "Cross-Origin Request Blocked", follow these steps immediately:**
+
+### 1. Backend Environment Variables (Render.com)
+Add these **REQUIRED** environment variables in your Render dashboard:
+
+```bash
+# CORS Configuration (CRITICAL)
+N8N_CORS_ORIGIN=https://llm-short-generator-frontend.vercel.app,http://localhost:3000
+N8N_CORS_CREDENTIALS=true
+
+# n8n Authentication
+N8N_USER=admin
+N8N_PASSWORD=MySecurePassword123!
+N8N_ENCRYPTION_KEY=wicwvq7FrC8kW9aEfOppqbmw0JWIEefL8idApUYLOf4=
+
+# OpenAI API
+OPENAI_API_KEY=your-openai-api-key-here
+```
+
+### 2. Frontend Environment Variables (Vercel)
+Update these in your Vercel dashboard:
+
+```bash
+# Correct Webhook URL (NOT REST API)
+NEXT_PUBLIC_N8N_BASE_URL=https://llm-short-generator-backend.onrender.com
+NEXT_PUBLIC_N8N_WEBHOOK_URL=https://llm-short-generator-backend.onrender.com/webhook/ai-video-repurposing
+```
+
+### 3. How to Set Environment Variables:
+
+**Render.com:**
+1. Go to https://dashboard.render.com
+2. Select your `llm-short-generator-backend` service
+3. Click "Environment" tab
+4. Add each variable above
+5. Click "Save Changes" (triggers redeploy)
+
+**Vercel:**
+1. Go to https://vercel.com/dashboard
+2. Select your `llm-short-generator-frontend` project
+3. Go to "Settings" → "Environment Variables"
+4. Add each variable above
+5. Redeploy the project
+
 ## 🏗️ Architecture Overview
 
 ```
